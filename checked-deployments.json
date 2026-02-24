@@ -1,0 +1,14 @@
+[
+  {
+    "chain_id": "1398243",
+    "network": "Automata Testnet",
+    "tcb": 21,
+    "contract": "AutomataEnclaveIdentityDaoVersioned.sol"
+  },
+  {
+    "chain_id": "1398243",
+    "network": "Automata Testnet",
+    "tcb": 21,
+    "contract": "AutomataFmspcTcbDaoVersioned.sol"
+  }
+]
