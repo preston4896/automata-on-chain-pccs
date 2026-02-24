@@ -171,12 +171,12 @@ else
 fi
 
 issue_body=$'# Intel TCB Recovery Deployment Check\n\n'
-issue_body+="Detected missing deployments for target TCB evaluation data numbers (${target_text}).\n"
-issue_body+="Check the boxes for contracts approved for deployment, then close this issue to trigger the deployment workflow.\n\n"
-issue_body+="<!-- tcb-recovery-monitor: early=${early} standard=${standard:-none} generated_at=${generated_at} -->\n\n"
+issue_body+="Detected missing deployments for target TCB evaluation data numbers (${target_text})."$'\n'
+issue_body+="Check the boxes for contracts approved for deployment, then close this issue to trigger the deployment workflow."$'\n\n'
+issue_body+="<!-- tcb-recovery-monitor: early=${early} standard=${standard:-none} generated_at=${generated_at} -->"$'\n\n'
 
 if [ "$missing_count" -eq 0 ]; then
-    issue_body+="No missing deployments detected.\n"
+    issue_body+="No missing deployments detected."$'\n'
 else
     current_chain=""
     current_tcb=""
@@ -189,19 +189,19 @@ else
 
         if [ "$row_chain" != "$current_chain" ]; then
             if [ -n "$current_chain" ]; then
-                issue_body+="\n"
+                issue_body+=$'\n'
             fi
-            issue_body+="# ${row_network} (${row_chain}):\n\n"
+            issue_body+="# ${row_network} (${row_chain}):"$'\n\n'
             current_chain="$row_chain"
             current_tcb=""
         fi
 
         if [ "$row_tcb" != "$current_tcb" ]; then
-            issue_body+="## TCB Evaluation Data Number ${row_tcb}\n"
+            issue_body+="## TCB Evaluation Data Number ${row_tcb}"$'\n'
             current_tcb="$row_tcb"
         fi
 
-        issue_body+="- [ ] ${row_contract}\n"
+        issue_body+="- [ ] ${row_contract}"$'\n'
     done < <(jq -c '.[]' <<<"$missing_json")
 fi
 
