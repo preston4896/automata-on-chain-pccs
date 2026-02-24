@@ -151,21 +151,6 @@ jobs:
             echo "changes=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create deployment pull request
-        id: cpr
-        if: steps.execute.outputs.changes == 'true'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          branch: deployment/issue-${{ github.event.issue.number }}
-          commit-message: "chore: deployment updates from issue #${{ github.event.issue.number }}"
-          title: "Deployment updates from issue #${{ github.event.issue.number }}"
-          body: |
-            Automated deployment updates for checked contracts in issue #${{ github.event.issue.number }}.
-
-            Source issue: ${{ github.event.issue.html_url }}
-          base: main
-          labels: deployment,automated
-
       - name: Write deployment summary
         if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
         run: |
@@ -207,6 +192,23 @@ jobs:
 
             echo "" >> "$GITHUB_STEP_SUMMARY"
           done
+
+      - name: Clean up temporary files
+        if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
+        run: rm -f checked-deployments.json deploy-results.json issue-body.md
+
+      - name: Create deployment pull request
+        id: cpr
+        if: steps.execute.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: deployment/issue-${{ github.event.issue.number }}
+          commit-message: "chore: deployment updates from issue #${{ github.event.issue.number }}"
+          title: "Deployment updates from issue #${{ github.event.issue.number }}"
+          body: |
+            Automated deployment updates for checked contracts in issue #${{ github.event.issue.number }}.
+          base: main
+          labels: deployment
 
       - name: No checked contracts
         if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count == '0'
