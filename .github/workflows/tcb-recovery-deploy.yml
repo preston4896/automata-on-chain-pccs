@@ -132,8 +132,9 @@ jobs:
             fi
 
             echo "Deploying ${contract_name} for TCB ${tcb_number} on chain ${chain_id}"
+            export RPC_URL="$rpc_url"
             OWNER="$owner" forge script script/automata/versioned/DeployAutomataVersioned.s.sol:DeployAutomataVersioned \
-              --rpc-url "$rpc_url" \
+              --rpc-url "$RPC_URL" \
               "${wallet_args[@]}" \
               --broadcast --skip-simulation -vv \
               --sig "$sig" "$tcb_number"
