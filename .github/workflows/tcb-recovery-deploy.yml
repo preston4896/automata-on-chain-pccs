@@ -78,8 +78,11 @@ jobs:
             exit 1
           fi
 
+          echo '[]' > deploy-results.json
+
           while IFS= read -r item; do
             chain_id="$(jq -r '.chain_id' <<<"$item")"
+            network="$(jq -r '.network' <<<"$item")"
             tcb_number="$(jq -r '.tcb' <<<"$item")"
             contract_name="$(jq -r '.contract' <<<"$item")"
 
@@ -127,6 +130,11 @@ jobs:
               "${wallet_args[@]}" \
               --broadcast --skip-simulation -vv \
               --sig "$sig" "$tcb_number"
+
+            jq -c --arg cid "$chain_id" --arg net "$network" --argjson tcb "$tcb_number" \
+              --arg key "$deploy_key" \
+              '. += [{ chain_id: $cid, network: $net, tcb: $tcb, deploy_key: $key }]' \
+              deploy-results.json > deploy-results.tmp && mv deploy-results.tmp deploy-results.json
           done < <(jq -c '.[]' checked-deployments.json)
 
           if git diff --quiet -- deployment; then
@@ -149,6 +157,48 @@ jobs:
             Source issue: ${{ github.event.issue.html_url }}
           base: main
           labels: deployment,automated
+
+      - name: Write deployment summary
+        if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
+        run: |
+          set -euo pipefail
+
+          results="$(cat deploy-results.json)"
+          result_count="$(jq 'length' <<<"$results")"
+
+          echo "# Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$result_count" -eq 0 ]; then
+            echo "No new contracts were deployed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          for chain_id in $(jq -r '[.[].chain_id] | unique | sort_by(tonumber) | .[]' <<<"$results"); do
+            network="$(jq -r --arg cid "$chain_id" '[.[] | select(.chain_id == $cid)][0].network' <<<"$results")"
+            echo "## ${network} (Chain ID: ${chain_id})" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Contract Name | TCB Eval Data Number | Address |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+
+            deployment_file="deployment/${chain_id}.json"
+
+            for row in $(jq -c --arg cid "$chain_id" '.[] | select(.chain_id == $cid)' <<<"$results"); do
+              tcb="$(jq -r '.tcb' <<<"$row")"
+              deploy_key="$(jq -r '.deploy_key' <<<"$row")"
+              contract_name="${deploy_key%%_tcbeval_*}"
+
+              if [ -f "$deployment_file" ]; then
+                address="$(jq -r --arg key "$deploy_key" '.[$key] // "—"' "$deployment_file")"
+              else
+                address="—"
+              fi
+
+              echo "| ${contract_name} | ${tcb} | \`${address}\` |" >> "$GITHUB_STEP_SUMMARY"
+            done
+
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: No checked contracts
         if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count == '0'
