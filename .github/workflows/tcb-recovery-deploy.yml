@@ -45,6 +45,13 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
+      
+      - name: Run Forge build
+        if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
+        run: |
+          forge --version
+          forge build --sizes
+        id: build
 
       - name: Execute checked deployments
         id: execute
