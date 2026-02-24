@@ -7,32 +7,32 @@ OUTPUT_PATH="${1:-}"
 
 network_name() {
     case "$1" in
-        1) echo "Ethereum" ;;
+        1) echo "Ethereum Mainnet" ;;
         10) echo "Optimism" ;;
         56) echo "BNB Smart Chain" ;;
         97) echo "BNB Testnet" ;;
-        130) echo "Unichain" ;;
+        130) echo "Unichain Mainnet" ;;
         137) echo "Polygon" ;;
         480) echo "World Chain" ;;
-        998) echo "HyperEVM" ;;
-        999) echo "HyperEVM Testnet" ;;
+        998) echo "HyperEVM Testnet" ;;
+        999) echo "HyperEVM Mainnet" ;;
         1301) echo "Unichain Sepolia" ;;
-        4326) echo "Chain 4326" ;;
-        6343) echo "Chain 6343" ;;
-        42429) echo "Chain 42429" ;;
-        43113) echo "Avalanche Fuji" ;;
-        43114) echo "Avalanche" ;;
-        65536) echo "ATA Sepolia" ;;
-        80002) echo "Polygon Amoy" ;;
+        4326) echo "MegaETH Mainnet" ;;
+        4801) echo "World Chain Sepolia" ;;
+        6343) echo "MegaETH Testnet" ;;
         8453) echo "Base" ;;
-        84532) echo "Base Sepolia" ;;
-        11155111) echo "Sepolia" ;;
-        11155420) echo "OP Sepolia" ;;
         42161) echo "Arbitrum One" ;;
+        42429) echo "Tempo Testnet" ;;
+        43113) echo "Avalanche Fuji" ;;
+        43114) echo "Avalanche C-Chain" ;;
+        65536) echo "Automata Mainnet" ;;
+        80002) echo "Polygon Amoy" ;;
+        84532) echo "Base Sepolia" ;;
         421614) echo "Arbitrum Sepolia" ;;
-        560048) echo "Hoodi Testnet" ;;
-        1398243) echo "ATA" ;;
-        4801) echo "World Sepolia" ;;
+        560048) echo "Ethereum Hoodi" ;;
+        1398243) echo "Automata Testnet" ;;
+        11155111) echo "Ethereum Sepolia" ;;
+        11155420) echo "Optimism Sepolia" ;;
         *) echo "Chain $1" ;;
     esac
 }
