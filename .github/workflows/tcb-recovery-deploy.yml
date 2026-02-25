@@ -86,6 +86,16 @@ jobs:
           fi
 
           echo '[]' > deploy-results.json
+          has_failures=false
+
+          record_result() {
+            local cid="$1" net="$2" tcb="$3" key="$4" st="$5" err="$6"
+            jq -c \
+              --arg cid "$cid" --arg net "$net" --argjson tcb "$tcb" \
+              --arg key "$key" --arg st "$st" --arg err "$err" \
+              '. += [{ chain_id: $cid, network: $net, tcb: $tcb, deploy_key: $key, status: $st, error: $err }]' \
+              deploy-results.json > deploy-results.tmp && mv deploy-results.tmp deploy-results.json
+          }
 
           while IFS= read -r item; do
             chain_id="$(jq -r '.chain_id' <<<"$item")"
@@ -93,24 +103,7 @@ jobs:
             tcb_number="$(jq -r '.tcb' <<<"$item")"
             contract_name="$(jq -r '.contract' <<<"$item")"
 
-            rpc_url="$(jq -r --arg id "$chain_id" '.[$id] // empty' <<<"$CHAIN_RPC_URL_MAP")"
-            if [ -z "$rpc_url" ]; then
-              echo "Missing RPC URL in CHAIN_RPC_URL_MAP for chain ID $chain_id"
-              exit 1
-            fi
-
-            resolved_chain_id="$(cast chain-id --rpc-url "$rpc_url")"
-            if [ "$resolved_chain_id" != "$chain_id" ]; then
-              echo "RPC URL chain mismatch for chain $chain_id (resolved $resolved_chain_id)"
-              exit 1
-            fi
-
-            deployment_file="deployment/${chain_id}.json"
-            if [ ! -f "$deployment_file" ]; then
-              echo "Missing deployment file: $deployment_file"
-              exit 1
-            fi
-
+            # Determine deploy_key and sig first so all failure paths can reference them
             case "$contract_name" in
               AutomataEnclaveIdentityDaoVersioned.sol)
                 deploy_key="AutomataEnclaveIdentityDaoVersioned_tcbeval_${tcb_number}"
@@ -121,28 +114,63 @@ jobs:
                 sig='deployFmspcTcbDaoVersioned(uint32)'
                 ;;
               *)
-                echo "Unsupported contract in issue checklist: $contract_name"
-                exit 1
+                echo "::error::Unsupported contract in issue checklist: $contract_name"
+                record_result "$chain_id" "$network" "$tcb_number" "$contract_name" "failed" "Unsupported contract: $contract_name"
+                has_failures=true
+                continue
                 ;;
             esac
 
+            rpc_url="$(jq -r --arg id "$chain_id" '.[$id] // empty' <<<"$CHAIN_RPC_URL_MAP")"
+            if [ -z "$rpc_url" ]; then
+              echo "::error::Missing RPC URL in CHAIN_RPC_URL_MAP for chain ID $chain_id"
+              record_result "$chain_id" "$network" "$tcb_number" "$deploy_key" "failed" "Missing RPC URL for chain $chain_id"
+              has_failures=true
+              continue
+            fi
+
+            if ! resolved_chain_id="$(cast chain-id --rpc-url "$rpc_url" 2>&1)"; then
+              echo "::error::Failed to query chain ID from RPC for chain $chain_id: $resolved_chain_id"
+              record_result "$chain_id" "$network" "$tcb_number" "$deploy_key" "failed" "cast chain-id failed for chain $chain_id"
+              has_failures=true
+              continue
+            fi
+            if [ "$resolved_chain_id" != "$chain_id" ]; then
+              echo "::error::RPC URL chain mismatch for chain $chain_id (resolved $resolved_chain_id)"
+              record_result "$chain_id" "$network" "$tcb_number" "$deploy_key" "failed" "Chain ID mismatch: expected $chain_id, got $resolved_chain_id"
+              has_failures=true
+              continue
+            fi
+
+            deployment_file="deployment/${chain_id}.json"
+            if [ ! -f "$deployment_file" ]; then
+              echo "::error::Missing deployment file: $deployment_file"
+              record_result "$chain_id" "$network" "$tcb_number" "$deploy_key" "failed" "Missing deployment file: $deployment_file"
+              has_failures=true
+              continue
+            fi
+
             if jq -e --arg key "$deploy_key" 'has($key) and .[$key] != null and .[$key] != ""' "$deployment_file" >/dev/null; then
               echo "Skipping already deployed ${deploy_key} on chain ${chain_id}"
+              record_result "$chain_id" "$network" "$tcb_number" "$deploy_key" "skipped" ""
               continue
             fi
 
             echo "Deploying ${contract_name} for TCB ${tcb_number} on chain ${chain_id}"
             export RPC_URL="$rpc_url"
-            OWNER="$owner" forge script script/automata/versioned/DeployAutomataVersioned.s.sol:DeployAutomataVersioned \
+            if forge_output="$(OWNER="$owner" forge script script/automata/versioned/DeployAutomataVersioned.s.sol:DeployAutomataVersioned \
               --rpc-url "$RPC_URL" \
               "${wallet_args[@]}" \
               --broadcast --skip-simulation -vv \
-              --sig "$sig" "$tcb_number"
-
-            jq -c --arg cid "$chain_id" --arg net "$network" --argjson tcb "$tcb_number" \
-              --arg key "$deploy_key" \
-              '. += [{ chain_id: $cid, network: $net, tcb: $tcb, deploy_key: $key }]' \
-              deploy-results.json > deploy-results.tmp && mv deploy-results.tmp deploy-results.json
+              --sig "$sig" "$tcb_number" 2>&1)"; then
+              echo "$forge_output"
+              record_result "$chain_id" "$network" "$tcb_number" "$deploy_key" "completed" ""
+            else
+              echo "$forge_output"
+              echo "::error::forge script failed for ${deploy_key} on chain ${chain_id}"
+              record_result "$chain_id" "$network" "$tcb_number" "$deploy_key" "failed" "forge script failed for ${deploy_key} on chain ${chain_id}"
+              has_failures=true
+            fi
           done < <(jq -c '.[]' checked-deployments.json)
 
           if git diff --quiet -- deployment; then
@@ -151,10 +179,22 @@ jobs:
             echo "changes=true" >> "$GITHUB_OUTPUT"
           fi
 
+          if [ "$has_failures" = true ]; then
+            echo "::warning::One or more deployments failed. See deployment summary for details."
+            exit 1
+          fi
+
       - name: Write deployment summary
-        if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
+        if: always() && steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
         run: |
           set -euo pipefail
+
+          if [ ! -f deploy-results.json ]; then
+            echo "# Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ No deployment results file found. The workflow may have failed before deployments started." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
 
           results="$(cat deploy-results.json)"
           result_count="$(jq 'length' <<<"$results")"
@@ -171,35 +211,59 @@ jobs:
             network="$(jq -r --arg cid "$chain_id" '[.[] | select(.chain_id == $cid)][0].network' <<<"$results")"
             echo "## ${network} (Chain ID: ${chain_id})" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Contract Name | TCB Eval Data Number | Address |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Contract Name | TCB Eval Data Number | Address | Status |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| --- | --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
 
             deployment_file="deployment/${chain_id}.json"
 
-            for row in $(jq -c --arg cid "$chain_id" '.[] | select(.chain_id == $cid)' <<<"$results"); do
+            while IFS= read -r row; do
               tcb="$(jq -r '.tcb' <<<"$row")"
               deploy_key="$(jq -r '.deploy_key' <<<"$row")"
+              status="$(jq -r '.status' <<<"$row")"
+              error="$(jq -r '.error' <<<"$row")"
               contract_name="${deploy_key%%_tcbeval_*}"
 
-              if [ -f "$deployment_file" ]; then
-                address="$(jq -r --arg key "$deploy_key" '.[$key] // "—"' "$deployment_file")"
-              else
-                address="—"
-              fi
+              case "$status" in
+                completed)
+                  if [ -f "$deployment_file" ]; then
+                    address="$(jq -r --arg key "$deploy_key" '.[$key] // "—"' "$deployment_file")"
+                  else
+                    address="—"
+                  fi
+                  status_display="✅ Completed"
+                  ;;
+                failed)
+                  address="$error"
+                  status_display="❌ Failed"
+                  ;;
+                skipped)
+                  address="Already deployed"
+                  status_display="⏭️ Skipped"
+                  ;;
+                *)
+                  address="—"
+                  status_display="Unknown"
+                  ;;
+              esac
 
-              echo "| ${contract_name} | ${tcb} | \`${address}\` |" >> "$GITHUB_STEP_SUMMARY"
-            done
+              echo "| ${contract_name} | ${tcb} | \`${address}\` | ${status_display} |" >> "$GITHUB_STEP_SUMMARY"
+            done < <(jq -c --arg cid "$chain_id" '.[] | select(.chain_id == $cid)' <<<"$results")
 
             echo "" >> "$GITHUB_STEP_SUMMARY"
           done
 
+          completed_count="$(jq '[.[] | select(.status == "completed")] | length' <<<"$results")"
+          failed_count="$(jq '[.[] | select(.status == "failed")] | length' <<<"$results")"
+          skipped_count="$(jq '[.[] | select(.status == "skipped")] | length' <<<"$results")"
+          echo "**Results**: ${completed_count} completed, ${failed_count} failed, ${skipped_count} skipped" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Clean up temporary files
-        if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
+        if: always() && steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
         run: rm -f checked-deployments.json deploy-results.json issue-body.md
 
       - name: Create deployment pull request
         id: cpr
-        if: steps.execute.outputs.changes == 'true'
+        if: always() && steps.execute.outputs.changes == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
           branch: deployment/issue-${{ github.event.issue.number }}
