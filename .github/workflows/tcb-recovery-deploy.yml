@@ -10,13 +10,19 @@ permissions:
 
 jobs:
   deploy:
-    if: startsWith(github.event.issue.title, 'Missing Deployment Found')
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.issue.state_reason == 'completed' &&
+      startsWith(github.event.issue.title, 'Missing Deployment Found') &&
+      contains(github.event.issue.labels.*.name, 'tcb-recovery-missing-deployment') &&
+      github.event.issue.user.login == 'github-actions[bot]' &&
+      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.sender.author_association)
     runs-on: ubuntu-latest
     environment: tcb-deploy
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # pinned from v6
 
       - name: Validate issue label
         id: validate
@@ -42,7 +48,7 @@ jobs:
 
       - name: Install Foundry
         if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # pinned from v1
         with:
           version: nightly
       
@@ -264,7 +270,7 @@ jobs:
       - name: Create deployment pull request
         id: cpr
         if: always() && steps.execute.outputs.changes == 'true'
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # pinned from v8
         with:
           branch: deployment/issue-${{ github.event.issue.number }}
           commit-message: "chore: deployment updates from issue #${{ github.event.issue.number }}"
