@@ -47,8 +47,6 @@ jobs:
       - name: Install Foundry
         if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
         uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # pinned from v1
-        with:
-          version: nightly
       
       - name: Run Forge build
         if: steps.validate.outputs.has_label == 'true' && steps.parse.outputs.selected_count != '0'
