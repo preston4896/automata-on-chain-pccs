@@ -37,6 +37,13 @@ network_name() {
     esac
 }
 
+is_testnet() {
+    case "$1" in
+        *Testnet*|*Sepolia*|*Fuji*|*Amoy*|*Hoodi*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 date_add_one_year_epoch() {
     input_date="$1"
 
@@ -129,6 +136,11 @@ for deployment_file in "$DEPLOYMENT_DIR"/*.json; do
 
     chain_id="$(basename "$deployment_file" .json)"
     network="$(network_name "$chain_id")"
+    if is_testnet "$network"; then
+        testnet_flag=true
+    else
+        testnet_flag=false
+    fi
 
     for eval_number in "${targets[@]}"; do
         enclave_key="AutomataEnclaveIdentityDaoVersioned_tcbeval_${eval_number}"
@@ -139,8 +151,9 @@ for deployment_file in "$DEPLOYMENT_DIR"/*.json; do
                 --arg chain_id "$chain_id" \
                 --arg network "$network" \
                 --argjson tcb "$eval_number" \
+                --argjson is_testnet "$testnet_flag" \
                 --arg contract "AutomataEnclaveIdentityDaoVersioned.sol" \
-                '{chain_id: $chain_id, network: $network, tcb: $tcb, contract: $contract}' >> "$missing_file"
+                '{chain_id: $chain_id, network: $network, tcb: $tcb, is_testnet: $is_testnet, contract: $contract}' >> "$missing_file"
         fi
 
         if ! jq -e --arg key "$fmspc_key" 'has($key) and .[$key] != null and .[$key] != ""' "$deployment_file" >/dev/null; then
@@ -148,14 +161,15 @@ for deployment_file in "$DEPLOYMENT_DIR"/*.json; do
                 --arg chain_id "$chain_id" \
                 --arg network "$network" \
                 --argjson tcb "$eval_number" \
+                --argjson is_testnet "$testnet_flag" \
                 --arg contract "AutomataFmspcTcbDaoVersioned.sol" \
-                '{chain_id: $chain_id, network: $network, tcb: $tcb, contract: $contract}' >> "$missing_file"
+                '{chain_id: $chain_id, network: $network, tcb: $tcb, is_testnet: $is_testnet, contract: $contract}' >> "$missing_file"
         fi
     done
 done
 
 if [ -s "$missing_file" ]; then
-    missing_json="$(jq -s 'sort_by((.chain_id|tonumber), .tcb, .contract)' "$missing_file")"
+    missing_json="$(jq -s 'sort_by((if .is_testnet then 1 else 0 end), (.chain_id|tonumber), .tcb, .contract)' "$missing_file")"
 else
     missing_json='[]'
 fi
@@ -173,11 +187,15 @@ fi
 issue_body=$'# Intel TCB Recovery Deployment Check\n\n'
 issue_body+="Detected missing deployments for target TCB evaluation data numbers (${target_text})."$'\n'
 issue_body+="Check the boxes for contracts approved for deployment, then close this issue to trigger the deployment workflow."$'\n\n'
+issue_body+=$'> [!NOTE]\n'
+issue_body+=$'> Checking a **Select all** checkbox will override all subsection checkboxes within that section.\n'
+issue_body+=$'> To selectively deploy, leave the section-level checkbox unchecked and check individual items instead.\n\n'
 issue_body+="<!-- tcb-recovery-monitor: early=${early} standard=${standard:-none} generated_at=${generated_at} -->"$'\n\n'
 
 if [ "$missing_count" -eq 0 ]; then
     issue_body+="No missing deployments detected."$'\n'
 else
+    current_section=""
     current_chain=""
     current_tcb=""
 
@@ -186,18 +204,35 @@ else
         row_network="$(jq -r '.network' <<<"$row")"
         row_tcb="$(jq -r '.tcb' <<<"$row")"
         row_contract="$(jq -r '.contract' <<<"$row")"
+        row_testnet="$(jq -r '.is_testnet' <<<"$row")"
 
-        if [ "$row_chain" != "$current_chain" ]; then
-            if [ -n "$current_chain" ]; then
+        if [ "$row_testnet" = "true" ]; then
+            section="Testnet"
+        else
+            section="Mainnet"
+        fi
+
+        if [ "$section" != "$current_section" ]; then
+            if [ -n "$current_section" ]; then
                 issue_body+=$'\n'
             fi
-            issue_body+="# ${row_network} (${row_chain}):"$'\n\n'
+            issue_body+="# ${section}"$'\n'
+            issue_body+="- [ ] Select all ${section}"$'\n\n'
+            current_section="$section"
+            current_chain=""
+            current_tcb=""
+        fi
+
+        if [ "$row_chain" != "$current_chain" ]; then
+            issue_body+="## ${row_network} (${row_chain}):"$'\n'
+            issue_body+="- [ ] Select all ${row_network}"$'\n\n'
             current_chain="$row_chain"
             current_tcb=""
         fi
 
         if [ "$row_tcb" != "$current_tcb" ]; then
-            issue_body+="## TCB Evaluation Data Number ${row_tcb}"$'\n'
+            issue_body+="### TCB Evaluation Data Number ${row_tcb}"$'\n'
+            issue_body+="- [ ] Select all TCB ${row_tcb}"$'\n'
             current_tcb="$row_tcb"
         fi
 
