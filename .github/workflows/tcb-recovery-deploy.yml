@@ -11,12 +11,10 @@ permissions:
 jobs:
   deploy:
     if: >-
-      github.event.action == 'closed' &&
       (!github.event.issue.state_reason || github.event.issue.state_reason == 'completed') &&
       github.event.issue.user.login == 'github-actions[bot]' &&
       startsWith(github.event.issue.title, 'Missing Deployment Found') &&
-      contains(github.event.issue.labels.*.name, 'tcb-recovery-missing-deployment') &&
-      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.sender.author_association)
+      contains(github.event.issue.labels.*.name, 'tcb-recovery-missing-deployment')
     runs-on: ubuntu-latest
     environment: tcb-deploy
 
